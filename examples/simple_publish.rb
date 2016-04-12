@@ -8,8 +8,7 @@ $:.unshift File.dirname(__FILE__)+'/../lib'
 require 'rubygems'
 require 'mqtt'
 
-MQTT::Client.connect('test.mosquitto.org') do |client|
+client=MQTT::Client.connect('localhost',:client_id=>"rubyhello")
+client.publish('test', "The time is: #{Time.now}",false,1)
 
-  client.publish('test', "The time is: #{Time.now}")
-
-end
+sleep 1000

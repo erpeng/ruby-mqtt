@@ -34,5 +34,6 @@ Gem::Specification.new do |gem|
   else
     raise "#{Gem.ruby_version} is an unsupported version of ruby"
   end
+  gem.add_dependency  'redis'
 
 end

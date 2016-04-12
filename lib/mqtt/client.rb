@@ -179,6 +179,7 @@ class MQTT::Client
     @socket = nil
     @read_queue = Queue.new
     @read_thread = nil
+    @publish_retry_thread = nil
     @write_semaphore = Mutex.new
   end
 
@@ -270,6 +271,8 @@ class MQTT::Client
         :will_retain => @will_retain
       )
 
+      get_client_last_packet_id packet.id
+
       # Send packet
       send_packet(packet)
 
@@ -281,6 +284,14 @@ class MQTT::Client
         Thread.current[:parent] = parent
         while connected? do
           receive_packet
+        end
+      end
+
+      @publish_retry_thread = Thread.new(Thread.current) do |parent|
+        Thread.current[:parent] = parent
+        while connected? do
+          resend_packet
+          sleep 1
         end
       end
     end
@@ -302,6 +313,9 @@ class MQTT::Client
     @read_thread.kill if @read_thread and @read_thread.alive?
     @read_thread = nil
 
+    @publish_retry_thread.kill if @publish_retry_thread and @publish_retry_thread.alive?
+    @publish_retry_thread = nil
+
     # Close the socket if it is open
     if connected?
       if send_msg
@@ -311,6 +325,7 @@ class MQTT::Client
       @socket.close unless @socket.nil?
       @socket = nil
     end
+    save_client_last_packet_id(@last_packet_id)
   end
 
   # Checks whether the client is connected to the server.
@@ -331,6 +346,7 @@ class MQTT::Client
       :payload => payload
     )
 
+    save_packet(packet,@ack_timeout,@client_id) if qos>0
     # Send the packet
     send_packet(packet)
   end
@@ -400,12 +416,14 @@ class MQTT::Client
       loop do
         packet = @read_queue.pop
         yield(packet)
-        puback_packet(packet) if packet.qos > 0
+        puback_packet(packet) if packet.qos == 1
+        pubrec_packet(packet) if packet.qos == 2
       end
     else
       # Wait for one packet to be available
       packet = @read_queue.pop
-      puback_packet(packet) if packet.qos > 0
+      puback_packet(packet) if packet.qos == 1
+      pubrec_packet(packet) if packet.qos == 2
       return packet
     end
   end
@@ -463,6 +481,12 @@ private
       @read_queue.push(packet)
     elsif packet.class == MQTT::Packet::Pingresp
       @last_ping_response = Time.now
+    elsif packet.class == MQTT::Packet::Puback
+      puts "receive:#{@client_id+packet.id.to_s}"
+      @client=MQTT::Redis.new(@ack_timeout)
+      @client.remove(@client_id+packet.id.to_s)
+    elsif packet.class == MQTT::Packet::Pubrel
+      pubcomp_packet(packet)
     end
     # Ignore all other packets
     # FIXME: implement responses for QoS  2
@@ -485,6 +509,14 @@ private
 
   def puback_packet(packet)
     send_packet(MQTT::Packet::Puback.new :id => packet.id)
+  end
+
+  def pubrec_packet(packet)
+    send_packet(MQTT::Packet::Pubrec.new :id => packet.id)
+  end
+
+  def pubcomp_packet(packet)
+    send_packet(MQTT::Packet::Pubcomp.new :id => packet.id)
   end
 
   # Read and check a connection acknowledgement packet
@@ -515,6 +547,27 @@ private
     end
   end
 
+  def resend_packet
+    @client=MQTT::Redis.new(@ack_timeout)
+  #  puts "#{ack_timeout}"
+    @client.get do |packet|
+      send_packet(packet)
+    end
+  end
+
+  def save_packet(data,ack_timeout,client_id)
+    @client=MQTT::Redis.new(@ack_timeout)
+    @client.save(data,client_id)
+ #   puts "pub:#{@client_id+data.id.to_s}"
+  end
+
+  def save_client_last_packet_id(id)
+
+  end
+
+  def get_client_last_packet_id(id)
+
+  end
   private
   def parse_uri(uri)
     uri = URI.parse(uri) unless uri.is_a?(URI)

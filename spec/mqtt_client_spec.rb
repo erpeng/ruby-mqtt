@@ -5,6 +5,7 @@ $:.unshift(File.dirname(__FILE__))
 
 require 'spec_helper'
 require 'mqtt'
+require 'redis'
 
 describe MQTT::Client do
 
@@ -22,6 +23,7 @@ describe MQTT::Client do
       socket
     end
   end
+  let(:client_id) {MQTT::Client.generate_client_id}
 
   describe "initializing a client" do
     it "with no arguments, it should use the defaults" do
@@ -248,7 +250,12 @@ describe MQTT::Client do
     end
 
     it "should start the reader thread if not connected" do
-      expect(Thread).to receive(:new).once
+      expect(Thread).to receive(:new)
+      client.connect('myclient')
+    end
+
+    it "should start the public retry thread if not connected" do
+      expect(Thread).to receive(:new)
       client.connect('myclient')
     end
 
@@ -524,6 +531,7 @@ describe MQTT::Client do
   describe "when calling the 'publish' method" do
     before(:each) do
       client.instance_variable_set('@socket', socket)
+      client.instance_variable_set('@client_id',client_id)
     end
 
     it "should write a valid PUBLISH packet to the socket without the retain flag" do

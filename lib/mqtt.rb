@@ -38,6 +38,7 @@ module MQTT
   autoload :Client,   'mqtt/client'
   autoload :Packet,   'mqtt/packet'
   autoload :Proxy,    'mqtt/proxy'
+  autoload :Redis,    'mqtt/persistence/redis'
 
   # MQTT-SN
   module SN
