@@ -291,7 +291,7 @@ class MQTT::Client
         Thread.current[:parent] = parent
         while connected? do
           resend_packet
-          sleep 1
+          sleep 5
         end
       end
     end
@@ -417,13 +417,13 @@ class MQTT::Client
         packet = @read_queue.pop
         yield(packet)
         puback_packet(packet) if packet.qos == 1
-        pubrec_packet(packet) if packet.qos == 2
+       # pubrec_packet(packet) if packet.qos == 2
       end
     else
       # Wait for one packet to be available
       packet = @read_queue.pop
       puback_packet(packet) if packet.qos == 1
-      pubrec_packet(packet) if packet.qos == 2
+      #pubrec_packet(packet) if packet.qos == 2
       return packet
     end
   end
@@ -476,17 +476,40 @@ private
   end
 
   def handle_packet(packet)
+    #subscribe qos1 or qos 2
     if packet.class == MQTT::Packet::Publish
       # Add to queue
-      @read_queue.push(packet)
+      if packet.qos == 1
+        @read_queue.push(packet)
+      elsif packet.qos ==2
+        MQTT::Redis.set(@client_id+packet.id.to_s,packet)
+        pubrec_packet(packet)
+      end
+
+    #suscribe qos 2
+    elsif packet.class == MQTT::Packet::Pubrel
+      pk=MQTT::Redis.get(@client_id+packet.id.to_s))
+      if pk
+        @read_queue.push(pk)
+        MQTT::Redis.del(@client_id+packet.id.to_s))
+      end
+      pubcomp_packet(packet)
+    #pingreq
     elsif packet.class == MQTT::Packet::Pingresp
       @last_ping_response = Time.now
+    #publish qos1
     elsif packet.class == MQTT::Packet::Puback
-      puts "receive:#{@client_id+packet.id.to_s}"
+     # puts "receive:#{@client_id+packet.id.to_s}"
       @client=MQTT::Redis.new(@ack_timeout)
       @client.remove(@client_id+packet.id.to_s)
-    elsif packet.class == MQTT::Packet::Pubrel
-      pubcomp_packet(packet)
+    #publish  qos2
+    elsif packet.class == MQTT::Packet::Pubrec
+      MQTT::Redis.zadd(packet,@client_id)
+      pubrel_packet(packet)
+    #publish qos2
+    elsif packet.class == MQTT::Packet::Pubcomp
+      @client=MQTT::Redis.new(@ack_timeout)
+      @client.remove(@client_id+packet.id.to_s)
     end
     # Ignore all other packets
     # FIXME: implement responses for QoS  2
@@ -517,6 +540,10 @@ private
 
   def pubcomp_packet(packet)
     send_packet(MQTT::Packet::Pubcomp.new :id => packet.id)
+  end
+
+  def pubrel_packet(packet)
+    send_packet(MQTT::Packet::Pubrel.new :id => packet.id)
   end
 
   # Read and check a connection acknowledgement packet
@@ -551,6 +578,7 @@ private
     @client=MQTT::Redis.new(@ack_timeout)
   #  puts "#{ack_timeout}"
     @client.get do |packet|
+      packet.duplicate=true
       send_packet(packet)
     end
   end

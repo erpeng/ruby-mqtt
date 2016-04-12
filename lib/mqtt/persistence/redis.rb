@@ -36,4 +36,29 @@ class MQTT::Redis
     end
 
   end
+
+  def self.zadd(packet,client_id)
+    require 'redis'
+    client=Redis.new
+    client.zadd "mqtt-publish",Time.new(3000,01,01).to_i,client_id+packet.id.to_s
+  end
+
+  def self.set(key,value,ttl,nx=true)
+    require 'redis'
+    client=Redis.new
+    client.set key,value,:ex=>0,:nx=>nx
+  end
+
+  def self.get(key)
+    require 'redis'
+    client=Redis.new
+    client.get key
+  end
+
+
+  def self.del(key)
+    require 'redis'
+    client=Redis.new
+    client.del key
+  end
 end
